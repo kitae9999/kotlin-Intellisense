@@ -1,0 +1,12 @@
+.DS_Store
+.idea/
+.vscode/
+node_modules/
+dist/
+*.vsix
+
+**/.gradle/
+**/.kotlin/
+**/build/
+tests/.benchmark-system/
+tests/fixture/bin/

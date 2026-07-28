@@ -1,0 +1,89 @@
+{
+  "name": "kotlin-continuous-intellisense",
+  "displayName": "Kotlin Continuous IntelliSense",
+  "description": "Triggers Kotlin completion while an identifier is still being typed.",
+  "version": "0.5.0",
+  "publisher": "kitae-local",
+  "license": "Apache-2.0",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "kotlin",
+    "lsp",
+    "completion",
+    "intellisense",
+    "performance"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onLanguage:kotlin",
+    "onCommand:kotlinContinuousIntelliSense.showLog"
+  ],
+  "main": "./extension.js",
+  "scripts": {
+    "package": "npx --yes @vscode/vsce package --allow-missing-repository"
+  },
+  "extensionDependencies": [
+    "jetbrains.kotlin-server"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "kotlinContinuousIntelliSense.showLog",
+        "title": "Kotlin: Show Continuous IntelliSense Log"
+      },
+      {
+        "command": "kotlinContinuousIntelliSense.warmupNow",
+        "title": "Kotlin: Warm Up Continuous IntelliSense Now"
+      }
+    ],
+    "configuration": {
+      "title": "Kotlin Continuous IntelliSense",
+      "properties": {
+        "kotlinContinuousIntelliSense.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Trigger Kotlin suggestions while an identifier is being typed."
+        },
+        "kotlinContinuousIntelliSense.minimumPrefixLength": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 16,
+          "description": "Identifier length at which continuous suggestions start."
+        },
+        "kotlinContinuousIntelliSense.triggerIntervalMs": {
+          "type": "number",
+          "default": 10,
+          "minimum": 0,
+          "maximum": 500,
+          "description": "Minimum interval between leading-edge suggestion triggers. This is not an idle debounce."
+        },
+        "kotlinContinuousIntelliSense.warmupEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Warm the Kotlin completion engine in the background when a Kotlin editor becomes active."
+        },
+        "kotlinContinuousIntelliSense.warmupDelayMs": {
+          "type": "number",
+          "default": 100,
+          "minimum": 0,
+          "maximum": 5000,
+          "description": "Delay before the one-time background completion warmup."
+        },
+        "kotlinContinuousIntelliSense.debugLog": {
+          "type": "boolean",
+          "default": false,
+          "description": "Log each automatic suggestion trigger."
+        }
+      }
+    }
+  }
+}
