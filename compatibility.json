@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "supported": [
+    {
+      "extensionId": "jetbrains.kotlin-server",
+      "extensionVersion": "0.0.6",
+      "languageServerVersion": "LS-262.9593.0",
+      "targetJar": "server/lib/language-server.api.features.impl.common.jar",
+      "originalJarSha256": "9bf520789637525e7a302be6d0ba6fd6bd0663efbc550d992140cd39a43bad43",
+      "patchPayloadSha256": "93d644243d58f9fb85aa70857c4748ed616a351a2077e13d3e81e2bdcf0485dc"
+    }
+  ]
+}

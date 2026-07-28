@@ -1,0 +1,18 @@
+Kotlin Continuous IntelliSense
+Copyright 2026 kitae-local
+
+This project contains a modified source file from Kotlin/kotlin-lsp:
+https://github.com/Kotlin/kotlin-lsp
+
+The upstream source is licensed under the Apache License, Version 2.0.
+The original JetBrains copyright and license header is retained in the
+modified source file. Changes add cancellation-resistant completion reuse
+and an indexed annotation completion path for VS Code-compatible editors.
+
+This repository does not contain or redistribute the full Kotlin language
+server, the "Kotlin by JetBrains" extension, JetBrains Runtime, or proprietary
+JetBrains Air/Fleet components. Users must obtain the official extension
+separately.
+
+This is an unofficial community project and is not affiliated with or
+endorsed by JetBrains.
