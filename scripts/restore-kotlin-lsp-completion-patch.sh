@@ -5,7 +5,7 @@ set -eu
 SCRIPT_DIRECTORY=${0:A:h}
 ROOT_DIRECTORY=${SCRIPT_DIRECTORY:h}
 PATCH_JAR=${KOTLIN_LSP_PATCH_JAR:-${ROOT_DIRECTORY}/server-patch/build/libs/language-server-completion-patch.jar}
-EXPECTED_ORIGINAL_SHA256=9bf520789637525e7a302be6d0ba6fd6bd0663efbc550d992140cd39a43bad43
+EXPECTED_ORIGINAL_SHA256=f5c259d54a99ee6b08da2e29fe0aa11334f0cd8f2d6eab44bb83479c4ca2a8ce
 
 function resolve_target_jar() {
   if [[ -n ${KOTLIN_LSP_TARGET_JAR:-} ]]; then
@@ -25,14 +25,17 @@ function resolve_target_jar() {
 
   local matches=()
   local root
+  local extension_directory
   local candidate
   for root in "${roots[@]}"; do
-    candidate="${root}/jetbrains.kotlin-server-0.0.6/server/lib/language-server.api.features.impl.common.jar"
-    [[ -f ${candidate} ]] && matches+=("${candidate}")
+    for extension_directory in "${root}"/jetbrains.kotlin-server-0.0.8*(N/); do
+      candidate="${extension_directory}/server/lib/language-server.api.features.impl.common.jar"
+      [[ -f ${candidate} ]] && matches+=("${candidate}")
+    done
   done
 
   if (( ${#matches[@]} == 0 )); then
-    print -u2 "Kotlin by JetBrains 0.0.6 was not found."
+    print -u2 "Kotlin by JetBrains 0.0.8 was not found."
     print -u2 "Set KOTLIN_LSP_TARGET_JAR or KOTLIN_LSP_EXTENSION_ROOT explicitly."
     return 1
   fi
@@ -46,7 +49,7 @@ function resolve_target_jar() {
 }
 
 TARGET_JAR=$(resolve_target_jar)
-BACKUP_JAR=${KOTLIN_LSP_BACKUP_JAR:-${TARGET_JAR}.continuous-completion-backup-LS-262.9593.0}
+BACKUP_JAR=${KOTLIN_LSP_BACKUP_JAR:-${TARGET_JAR}.continuous-completion-backup-ILS-263.2689.0}
 
 if [[ ! -f ${TARGET_JAR} ]]; then
   print -u2 "Target JAR was not found: ${TARGET_JAR}"

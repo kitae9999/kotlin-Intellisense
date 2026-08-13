@@ -5,11 +5,12 @@ the official **Kotlin by JetBrains** extension.
 
 The project fixes the case where completion work is repeatedly cancelled while
 the user is still typing. It also adds a fast indexed path for annotation
-classes, including automatic imports from the Gradle-imported project classpath.
+classes, including automatic imports from the current file's Gradle-imported
+resolve scope.
 
 > [!IMPORTANT]
-> This is a version-locked experimental patch. The first release supports only
-> `jetbrains.kotlin-server@0.0.6` with `LS-262.9593.0`.
+> This is a version-locked experimental patch. Version `0.6.0` supports only
+> `jetbrains.kotlin-server@0.0.8` with `ILS-263.2689.0`.
 
 ## Architecture
 
@@ -21,12 +22,14 @@ The project has two parts:
 2. `server-patch/` changes the official language server completion helper:
    - in-flight semantic completion survives cancellation and can be reused by
      a longer prefix;
-   - `@` followed by at least three characters uses the IntelliJ project class
-     index to return annotation classes and LSP import edits directly.
+   - `@` followed by at least three characters reads the Java short-class Stub
+     index through the 0.0.8 Java plugin class loader, then uses the current PSI
+     file's resolve scope to return accessible annotation classes and LSP
+     import edits directly.
 
 There are no hard-coded Spring symbols. `RestController`, `RequestMapping`,
 `GetMapping`, `Service`, and other annotations are discovered from the indexed
-project and library classes.
+project and library classes that are visible to the current file.
 
 ## What is not included
 
@@ -38,7 +41,7 @@ Install the official `jetbrains.kotlin-server` extension first.
 
 Requirements:
 
-- the official Kotlin extension `0.0.6`;
+- the official Kotlin extension `0.0.8`;
 - JDK 24 or a compatible Gradle toolchain;
 - network access for the first Gradle dependency resolution.
 
@@ -47,7 +50,7 @@ Locate the extension's `server` directory and run:
 ```bash
 cd server-patch
 ./gradlew \
-  -PkotlinLspServerHome="$HOME/.cursor/extensions/jetbrains.kotlin-server-0.0.6/server" \
+  -PkotlinLspServerHome="$HOME/.vscode/extensions/jetbrains.kotlin-server-0.0.8-darwin-arm64/server" \
   clean jar
 ```
 
@@ -81,8 +84,8 @@ Build and install the companion extension:
 ```bash
 cd vscode-extension
 npx --yes @vscode/vsce package --allow-missing-repository \
-  --out ../dist/kotlin-continuous-intellisense-0.5.0.vsix
-cursor --install-extension ../dist/kotlin-continuous-intellisense-0.5.0.vsix --force
+  --out ../dist/kotlin-continuous-intellisense-0.6.0.vsix
+code --install-extension ../dist/kotlin-continuous-intellisense-0.6.0.vsix --force
 ```
 
 Reload the editor or run `Kotlin: Restart LSP server`.
@@ -109,8 +112,11 @@ KOTLIN_LSP_SERVER=/absolute/path/to/server/bin/intellij-server \
   --keystroke-ms=30
 ```
 
-The assertion requires a `RestController` completion item and
-`import smoke.RestController` without writing to the fixture source file.
+The assertions require a `RestController` completion item and
+`import smoke.RestController` without writing to the fixture source file. They
+also verify that an annotation from an `implementation` project dependency is
+included while one available only through `testImplementation` is excluded
+from a main-source completion request.
 
 General semantic completion can be checked with:
 
@@ -128,10 +134,11 @@ import edit.
 
 ## Known limitations
 
-- The annotation fast path currently searches the whole indexed project scope.
-  A future release should use the current file's resolve scope so that
-  dependencies from unrelated modules or test-only source sets cannot leak into
-  main-source suggestions.
+- The direct annotation fast path targets Java annotation classes, including
+  Spring annotations. Kotlin-source annotations fall back to the official
+  semantic completion path.
+- A newly imported project still needs its first IntelliJ index build; the
+  companion extension warms completion after a Kotlin editor becomes active.
 - The binary patch is tied to an exact language-server build and may be
   overwritten by an official extension update.
 - The repository currently provides a macOS/zsh installer. The Kotlin and

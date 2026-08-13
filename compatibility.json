@@ -3,11 +3,11 @@
   "supported": [
     {
       "extensionId": "jetbrains.kotlin-server",
-      "extensionVersion": "0.0.6",
-      "languageServerVersion": "LS-262.9593.0",
+      "extensionVersion": "0.0.8",
+      "languageServerVersion": "ILS-263.2689.0",
       "targetJar": "server/lib/language-server.api.features.impl.common.jar",
-      "originalJarSha256": "9bf520789637525e7a302be6d0ba6fd6bd0663efbc550d992140cd39a43bad43",
-      "patchPayloadSha256": "93d644243d58f9fb85aa70857c4748ed616a351a2077e13d3e81e2bdcf0485dc"
+      "originalJarSha256": "f5c259d54a99ee6b08da2e29fe0aa11334f0cd8f2d6eab44bb83479c4ca2a8ce",
+      "patchPayloadSha256": "f114f6be0cabe72d41462a9c9a02d3ffb6ecaff3c65d4d86584de52df42fa2b6"
     }
   ]
 }

@@ -5,18 +5,18 @@ import com.intellij.codeInsight.completion.impl.CamelHumpMatcher
 import com.intellij.codeInsight.completion.PrefixMatcher
 import com.intellij.codeInsight.lookup.LookupElement
 import com.intellij.codeInsight.lookup.LookupElementPresentation
+import com.intellij.ide.plugins.PluginManagerCore
 import com.intellij.lang.Language
 import com.intellij.openapi.application.edtWriteAction
 import com.intellij.openapi.application.invokeAndWaitIfNeeded
 import com.intellij.openapi.application.readAction
 import com.intellij.openapi.application.runWriteAction
 import com.intellij.openapi.editor.Document
-import com.intellij.openapi.project.IndexNotReadyException
+import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.vfs.findDocument
 import com.intellij.openapi.vfs.findPsiFile
 import com.intellij.psi.PsiFile
 import com.intellij.psi.search.GlobalSearchScope
-import com.intellij.psi.search.PsiShortNamesCache
 import com.jetbrains.analyzer.codeServer.createCompletionProcess
 import com.jetbrains.analyzer.codeServer.insertCompletion
 import com.jetbrains.analyzer.codeServer.performCompletion
@@ -76,6 +76,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
+import java.lang.reflect.Method
 import java.util.concurrent.atomic.AtomicLong
 
 class LSCompletionProviderHelper(
@@ -163,9 +164,15 @@ class LSCompletionProviderHelper(
 
         val fastAnnotationItems = server.withAnalysisContextAndFileSettings(params.textDocument.uri.uri) {
             readAction {
-                params.textDocument.findVirtualFile()?.findDocument()?.let { document ->
-                    buildFastAnnotationCompletionItems(params, document, input)
-                }.orEmpty()
+                val file = params.textDocument.findVirtualFile() ?: return@readAction emptyList()
+                val document = file.findDocument() ?: return@readAction emptyList()
+                val psiFile = file.findPsiFile(project) ?: return@readAction emptyList()
+                buildFastAnnotationCompletionItems(
+                    params = params,
+                    document = document,
+                    input = input,
+                    scope = psiFile.resolveScope,
+                )
             }
         }
         if (fastAnnotationItems.isNotEmpty()) {
@@ -221,6 +228,7 @@ class LSCompletionProviderHelper(
         params: CompletionParams,
         document: Document,
         input: CompletionInput,
+        scope: GlobalSearchScope,
     ): List<CompletionItem> {
         val prefix = input.prefix
         val prefixStart = input.cacheKey.prefixStart
@@ -232,44 +240,49 @@ class LSCompletionProviderHelper(
             return emptyList()
         }
 
-        val shortNamesCache = PsiShortNamesCache.getInstance(project)
-        val scope = GlobalSearchScope.allScope(project)
-        val matchingShortNames = try {
-            shortNamesCache.allClassNames
-                .asSequence()
-                .filter { it.startsWith(prefix, ignoreCase = true) }
-                .sortedWith(
-                    compareBy<String>(
-                        { !it.startsWith(prefix) },
-                        { it.length },
-                        { it },
-                    )
+        val reflection = fastAnnotationReflection
+            ?: FastAnnotationReflection.create()?.also { fastAnnotationReflection = it }
+            ?: return emptyList()
+        val shortClassNameIndex = reflection.invoke(reflection.getInstance, null)
+            ?: return emptyList()
+        val allClassNames = reflection.invoke(reflection.getAllKeys, shortClassNameIndex, project) as? Collection<*>
+            ?: return emptyList()
+        val matchingShortNames = allClassNames
+            .asSequence()
+            .mapNotNull { it as? String }
+            .filter { it.startsWith(prefix, ignoreCase = true) }
+            .sortedWith(
+                compareBy<String>(
+                    { !it.startsWith(prefix) },
+                    { it.length },
+                    { it },
                 )
-                .take(FAST_ANNOTATION_SHORT_NAME_LIMIT)
-                .toList()
-        } catch (_: IndexNotReadyException) {
-            return emptyList()
-        }
+            )
+            .take(FAST_ANNOTATION_SHORT_NAME_LIMIT)
+            .toList()
 
         val importContext = FastImportContext.create(document)
         val seenQualifiedNames = HashSet<String>()
-        val candidates = try {
-            matchingShortNames
-                .asSequence()
-                .flatMap { shortNamesCache.getClassesByName(it, scope).asSequence() }
-                .filter { it.isAnnotationType }
-                .mapNotNull { psiClass ->
-                    val simpleName = psiClass.name ?: return@mapNotNull null
-                    val qualifiedName = psiClass.qualifiedName ?: return@mapNotNull null
-                    if (!seenQualifiedNames.add(qualifiedName)) return@mapNotNull null
-                    val importEdits = importContext.createImportEdits(qualifiedName, simpleName)
-                        ?: return@mapNotNull null
-                    FastAnnotationCandidate(simpleName, qualifiedName, importEdits)
-                }
-                .take(FAST_ANNOTATION_ITEM_LIMIT)
-                .toList()
-        } catch (_: IndexNotReadyException) {
-            return emptyList()
+        val candidates = ArrayList<FastAnnotationCandidate>()
+        for (shortName in matchingShortNames) {
+            val classes = reflection.invoke(
+                reflection.getClasses,
+                shortClassNameIndex,
+                shortName,
+                project,
+                scope,
+            ) as? Collection<*> ?: continue
+            for (psiClass in classes) {
+                psiClass ?: continue
+                if (reflection.invoke(reflection.isAnnotationType, psiClass) != true) continue
+                val simpleName = reflection.invoke(reflection.getName, psiClass) as? String ?: continue
+                val qualifiedName = reflection.invoke(reflection.getQualifiedName, psiClass) as? String ?: continue
+                if (!seenQualifiedNames.add(qualifiedName)) continue
+                val importEdits = importContext.createImportEdits(qualifiedName, simpleName) ?: continue
+                candidates += FastAnnotationCandidate(simpleName, qualifiedName, importEdits)
+                if (candidates.size >= FAST_ANNOTATION_ITEM_LIMIT) break
+            }
+            if (candidates.size >= FAST_ANNOTATION_ITEM_LIMIT) break
         }
 
         val prefixEnd = prefixStart + prefix.length
@@ -415,7 +428,7 @@ class LSCompletionProviderHelper(
                     lookup.renderElement(it)
                 }
                 val obj = LSCompletion(params, lookup, matcher)
-                val key = CompletionItemId(completionItemIdSequence.incrementAndGet())
+                val key = CompletionItemId.fromJson(JsonPrimitive(completionItemIdSequence.incrementAndGet()))
                 CompletionItemWithObject(
                     item = CompletionItem(
                         label = lookupPresentation.itemText ?: lookup.lookupString,
@@ -599,6 +612,99 @@ class LSCompletionProviderHelper(
         val importEdits: List<TextEdit>,
     )
 
+    private data class FastAnnotationReflection(
+        val getInstance: Method,
+        val getAllKeys: Method,
+        val getClasses: Method,
+        val isAnnotationType: Method,
+        val getName: Method,
+        val getQualifiedName: Method,
+    ) {
+        fun invoke(method: Method, receiver: Any?, vararg arguments: Any?): Any? = try {
+            method.invoke(receiver, *arguments)
+        } catch (_: ReflectiveOperationException) {
+            null
+        } catch (_: LinkageError) {
+            null
+        }
+
+        companion object {
+            fun create(): FastAnnotationReflection? {
+                val classLoaders = LinkedHashSet<ClassLoader>()
+                findClassOwnerClassLoader()?.let(classLoaders::add)
+                collectEnabledModuleClassLoaders(classLoaders)
+                runCatching {
+                    PluginManagerCore.getPlugin(PluginId.getId(JAVA_PLUGIN_ID))
+                        ?.pluginClassLoader
+                        ?.let(classLoaders::add)
+                }
+                Thread.currentThread().contextClassLoader?.let(classLoaders::add)
+                LSCompletionProviderHelper::class.java.classLoader?.let(classLoaders::add)
+
+                return classLoaders.firstNotNullOfOrNull(::load)
+            }
+
+            private fun findClassOwnerClassLoader(): ClassLoader? = try {
+                val findDescriptor = PluginManagerCore::class.java.findMethod(
+                    "getPluginDescriptorOrPlatformByClassName",
+                    1,
+                ) ?: return null
+                val descriptor = findDescriptor.invoke(null, JAVA_SHORT_CLASS_NAME_INDEX_CLASS_NAME)
+                    ?: return null
+                descriptor.javaClass.findMethod("getPluginClassLoader", 0)
+                    ?.invoke(descriptor) as? ClassLoader
+            } catch (_: ReflectiveOperationException) {
+                null
+            } catch (_: LinkageError) {
+                null
+            }
+
+            private fun collectEnabledModuleClassLoaders(destination: MutableSet<ClassLoader>) {
+                try {
+                    val pluginSet = PluginManagerCore.getPluginSet()
+                    val modules = pluginSet.javaClass.findMethod("getEnabledModules", 0)
+                        ?.invoke(pluginSet) as? Iterable<*> ?: return
+                    for (module in modules) {
+                        module ?: continue
+                        try {
+                            val classLoader = module.javaClass.findMethod("getPluginClassLoader", 0)
+                                ?.invoke(module) as? ClassLoader ?: continue
+                            destination += classLoader
+                        } catch (_: ReflectiveOperationException) {
+                            continue
+                        } catch (_: LinkageError) {
+                            continue
+                        }
+                    }
+                } catch (_: ReflectiveOperationException) {
+                    return
+                } catch (_: LinkageError) {
+                    return
+                }
+            }
+
+            private fun load(classLoader: ClassLoader): FastAnnotationReflection? = try {
+                val cacheClass = Class.forName(JAVA_SHORT_CLASS_NAME_INDEX_CLASS_NAME, false, classLoader)
+                val psiClass = Class.forName(PSI_CLASS_CLASS_NAME, false, classLoader)
+                FastAnnotationReflection(
+                    getInstance = cacheClass.findMethod("getInstance", 0) ?: return null,
+                    getAllKeys = cacheClass.findMethod("getAllKeys", 1) ?: return null,
+                    getClasses = cacheClass.findMethod("getClasses", 3) ?: return null,
+                    isAnnotationType = psiClass.findMethod("isAnnotationType", 0) ?: return null,
+                    getName = psiClass.findMethod("getName", 0) ?: return null,
+                    getQualifiedName = psiClass.findMethod("getQualifiedName", 0) ?: return null,
+                )
+            } catch (_: ReflectiveOperationException) {
+                null
+            } catch (_: LinkageError) {
+                null
+            }
+
+            private fun Class<*>.findMethod(name: String, parameterCount: Int): Method? =
+                methods.firstOrNull { it.name == name && it.parameterCount == parameterCount }
+        }
+    }
+
     private data class FastImportDirective(
         val path: String,
         val alias: String?,
@@ -694,10 +800,16 @@ class LSCompletionProviderHelper(
     private data class CompletionInsertionResult(val edits: List<TextEdit>, val caretPosition: Position, val caretOffset: Int)
 
     private companion object {
-        const val REUSABLE_COMPLETION_MIN_PREFIX_LENGTH = 3
+        const val REUSABLE_COMPLETION_MIN_PREFIX_LENGTH = 1
         const val FAST_ANNOTATION_MIN_PREFIX_LENGTH = 3
         const val FAST_ANNOTATION_SHORT_NAME_LIMIT = 256
         const val FAST_ANNOTATION_ITEM_LIMIT = 50
+        const val JAVA_PLUGIN_ID = "org.jetbrains.ls.plugin.java"
+        const val JAVA_SHORT_CLASS_NAME_INDEX_CLASS_NAME =
+            "com.intellij.psi.impl.java.stubs.index.JavaShortClassNameIndex"
+        const val PSI_CLASS_CLASS_NAME = "com.intellij.psi.PsiClass"
+        @Volatile
+        var fastAnnotationReflection: FastAnnotationReflection? = null
         val PACKAGE_DIRECTIVE_REGEX = Regex(
             """(?m)^[\t ]*package[\t ]+([A-Za-z_][A-Za-z0-9_.]*)[\t ]*;?[\t ]*$"""
         )
