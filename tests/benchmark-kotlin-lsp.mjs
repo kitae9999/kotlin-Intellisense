@@ -425,7 +425,7 @@ async function runBenchmark(options) {
       (method, params) =>
         method === 'intellij/ready-for-test' ||
         (method === 'intellij/importLog' &&
-          (params?.succeeded === true || params?.failed === true)),
+          params?.failed === true),
       options.timeoutMs,
     );
     const initialized = await initialize(connection, options);
@@ -502,6 +502,7 @@ async function runBenchmark(options) {
             return result;
           },
           (error) => {
+            if (error.cause?.code !== -32800) throw error;
             const result = {
               prefix,
               elapsedMs: Number((performance.now() - startedAt).toFixed(1)),
@@ -541,6 +542,63 @@ async function runBenchmark(options) {
         );
       }
 
+      const requestAnnotationCompletion = async (prefix) => {
+        version += 1;
+        const probeLines = [...lines];
+        probeLines[benchmarkLine] =
+          `${probeLines[benchmarkLine].slice(0, prefixStartCharacter)}${prefix}`;
+        connection.notify('textDocument/didChange', {
+          textDocument: { uri: fileUri, version },
+          contentChanges: [{ text: probeLines.join('\n') }],
+        });
+        const completion = await connection.request(
+          'textDocument/completion',
+          {
+            textDocument: { uri: fileUri },
+            position: {
+              line: benchmarkLine,
+              character: prefixStartCharacter + prefix.length,
+            },
+            context: { triggerKind: 3 },
+          },
+          options.timeoutMs,
+        );
+        return Array.isArray(completion) ? completion : (completion?.items ?? []);
+      };
+
+      const visibleScopePrefix = 'VisibleScopeMar';
+      const visibleScopeItems = await requestAnnotationCompletion(visibleScopePrefix);
+      const visibleScopeItem = visibleScopeItems.find(
+        (item) => item.label === 'VisibleScopeMarker',
+      );
+      if (!visibleScopeItem) {
+        throw new Error(
+          'Annotation completion excluded visible.VisibleScopeMarker from an implementation ' +
+            `dependency. Results: ${JSON.stringify(visibleScopeItems.slice(0, 20))}`,
+        );
+      }
+      const visibleImportEdit = visibleScopeItem.additionalTextEdits?.find((edit) =>
+        edit.newText.includes('import visible.VisibleScopeMarker'),
+      );
+      if (!visibleImportEdit) {
+        throw new Error(
+          'VisibleScopeMarker completion had no visible.VisibleScopeMarker import: ' +
+            JSON.stringify(visibleScopeItem),
+        );
+      }
+
+      const excludedScopePrefix = 'UnrelatedScopeMar';
+      const excludedScopeItems = await requestAnnotationCompletion(excludedScopePrefix);
+      const leakedScopeItem = excludedScopeItems.find(
+        (item) => item.label === 'UnrelatedScopeMarker',
+      );
+      if (leakedScopeItem) {
+        throw new Error(
+          'Annotation completion leaked unrelated.UnrelatedScopeMarker from a sibling module: ' +
+            JSON.stringify(leakedScopeItem),
+        );
+      }
+
       connection.notify('textDocument/didClose', { textDocument: { uri: fileUri } });
       await connection.request('shutdown', null, 15_000);
       connection.notify('exit');
@@ -558,6 +616,14 @@ async function runBenchmark(options) {
           resultCount: finalItems.length,
           selectedItem: targetItem,
           autoImportVerified: true,
+          scopeIsolation: {
+            includedPrefix: visibleScopePrefix,
+            includedQualifiedName: 'visible.VisibleScopeMarker',
+            includedResultCount: visibleScopeItems.length,
+            excludedPrefix: excludedScopePrefix,
+            excludedQualifiedName: 'unrelated.UnrelatedScopeMarker',
+            excludedResultCount: excludedScopeItems.length,
+          },
         },
         writesToSourceFiles: false,
       };
@@ -642,6 +708,7 @@ async function runBenchmark(options) {
             return result;
           },
           (error) => {
+            if (error.cause?.code !== -32800) throw error;
             const result = {
               prefix: requestPrefix,
               elapsedMs: Number((performance.now() - startedAt).toFixed(1)),

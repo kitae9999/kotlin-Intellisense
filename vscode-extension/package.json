@@ -2,7 +2,7 @@
   "name": "kotlin-continuous-intellisense",
   "displayName": "Kotlin Continuous IntelliSense",
   "description": "Triggers Kotlin completion while an identifier is still being typed.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "publisher": "kitae-local",
   "license": "Apache-2.0",
   "engines": {

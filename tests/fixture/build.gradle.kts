@@ -6,6 +6,11 @@ repositories {
     mavenCentral()
 }
 
+dependencies {
+    implementation(project(":visible"))
+    testImplementation(project(":unrelated"))
+}
+
 kotlin {
     jvmToolchain(21)
 }
